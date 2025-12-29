@@ -10,6 +10,15 @@ npm install
 
 Команда запустит процесс установки зависимостей проекта из **npm**.
 
+## Переменные окружения
+PORT=3000 - порт http сервера
+DB_HOST=127.0.0.1 - хост mongoDB
+SALT=salt - для хеширования паролей
+JWT_SECRET=secret - для подписи jwt
+UPLOAD_DIR=upload - директория для загрузки файлов
+LOG_LEVEL=info - уровень логирования (fatal/error/warn/info/debug/trace/silent)
+NODE_ENV=development - окружение (development/production)
+
 ### Сценарии
 
 В `package.json` предопределено несколько сценариев.

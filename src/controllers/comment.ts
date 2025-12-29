@@ -11,22 +11,22 @@ import { PinoLoggerService } from '../logger/logger.js';
 import { CommentService } from '../services/comment.js';
 import { OfferService } from '../services/offer.js';
 
+import type { IUserRepository, WithId } from '../db/repositories/interfaces.js';
+import type { UserDB } from '../db/models/user.js';
 import type { CommentDB } from '../db/models/comment.js';
 import type { OfferDB } from '../db/models/offer.js';
+
+import { ConfigService } from '../config/service.js';
+
+import { HttpError } from '../errors/http-error.js';
 
 import { CommentCreateDto } from '../dto/comment.js';
 import type { CommentDto } from '../dto/comment.js';
 
-import type { IUserRepository, WithId } from '../db/repositories/interfaces.js';
-import type { UserDB } from '../db/models/user.js';
-import { ConfigService } from '../config/service.js';
-import { AuthMiddleware, type RequestWithUser } from '../middlewares/auth-middleware.js';
-
-import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
 import { ValidateDtoMiddleware } from '../middlewares/validate-dto.js';
+import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
+import { AuthMiddleware, type RequestWithUser } from '../middlewares/auth-middleware.js';
 import { DocumentExistsMiddleware } from '../middlewares/document-exists.js';
-
-import { HttpError } from '../errors/http-error.js';
 
 const MAX_COMMENTS = 50;
 const DEFAULT_AVATAR_URL = '/static/default-avatar.png';
@@ -44,13 +44,13 @@ export class CommentController extends Controller {
     @inject(TYPES.UserRepository) private readonly users: IUserRepository,
     @inject(TYPES.Config) private readonly config: ConfigService
   ) {
-    super(logger, '/comments');
+    super(logger, '/offers');
 
     const auth = new AuthMiddleware(this.users, this.config.getJwtSecret());
 
     this.addRoute({
       method: 'get',
-      path: '/:offerId',
+      path: '/:offerId/comments',
       middlewares: [
         new ValidateObjectIdMiddleware('offerId'),
         new DocumentExistsMiddleware<OfferDB>('offerId', this.offers, 'Offer not found')
@@ -60,7 +60,7 @@ export class CommentController extends Controller {
 
     this.addRoute({
       method: 'post',
-      path: '/:offerId',
+      path: '/:offerId/comments',
       middlewares: [
         new ValidateObjectIdMiddleware('offerId'),
         auth,
@@ -80,11 +80,10 @@ export class CommentController extends Controller {
     this.ok(res, dto);
   }
 
-  private async create(req: Request, res: Response, _next: NextFunction): Promise<void> {
+  private async create(req: RequestWithUser, res: Response, _next: NextFunction): Promise<void> {
     const { offerId } = req.params;
 
-    const { user } = req as RequestWithUser;
-    if (!user) {
+    if (!req.user) {
       throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
@@ -94,7 +93,7 @@ export class CommentController extends Controller {
       text: payload.text,
       rating: payload.rating,
       offer: new Types.ObjectId(offerId),
-      author: user._id
+      author: req.user._id
     });
 
     const dto = await this.toDto(created);
@@ -122,7 +121,7 @@ export class CommentController extends Controller {
 
   private toUserPublicDto(user: WithId<UserDB>) {
     return {
-      id: String(user._id),
+      id: getMongoId(user),
       name: user.name,
       email: user.email,
       avatarUrl: user.avatarUrl || DEFAULT_AVATAR_URL,
