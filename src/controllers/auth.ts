@@ -14,6 +14,11 @@ import { ValidateDtoMiddleware } from '../middlewares/validate-dto.js';
 import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
 import { UploadFileMiddleware } from '../middlewares/upload-file.js';
 import { ConfigService } from '../config/service.js';
+import { hashPassword, verifyPassword } from '../utils/password.js';
+import { signToken } from '../utils/token.js';
+import { AuthMiddleware, RequestWithUser } from '../middlewares/auth-middleware.js';
+
+const DEFAULT_AVATAR_URL = '/static/default-avatar.png';
 
 @injectable()
 export class AuthController extends Controller {
@@ -23,6 +28,8 @@ export class AuthController extends Controller {
     @inject(TYPES.Config) private readonly config: ConfigService
   ) {
     super(logger, '/auth');
+
+    const auth = new AuthMiddleware(this.users, this.config.getSalt());
 
     this.addRoute({
       method: 'post',
@@ -41,6 +48,7 @@ export class AuthController extends Controller {
     this.addRoute({
       method: 'get',
       path: '/status',
+      middlewares: [auth],
       handlers: [asyncHandler(this.status.bind(this))]
     });
 
@@ -49,6 +57,7 @@ export class AuthController extends Controller {
       path: '/:userId/avatar',
       middlewares: [
         new ValidateObjectIdMiddleware('userId'),
+        auth,
         new UploadFileMiddleware('avatar', this.config.getUploadDir())
       ],
       handlers: [asyncHandler(this.uploadAvatar.bind(this))]
@@ -66,7 +75,7 @@ export class AuthController extends Controller {
     const data: Partial<UserDB> = {
       name: payload.name,
       email: payload.email,
-      password: payload.password,
+      password: hashPassword(payload.password, this.config.getSalt()),
       type: payload.type
     };
 
@@ -79,31 +88,26 @@ export class AuthController extends Controller {
     const payload = req.body as LoginDto;
 
     const user = await this.users.findByEmail(payload.email);
-    if (!user || !user.password || user.password !== payload.password) {
+    if (!user || !user.password) {
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Invalid email or password');
+    }
+
+    const isValid = verifyPassword(payload.password, user.password, this.config.getSalt());
+    if (!isValid) {
       throw new HttpError(StatusCodes.UNAUTHORIZED, 'Invalid email or password');
     }
 
     const tokenDto: AuthTokenDto = {
-      token: user.email
+      token: signToken(String(user._id), user.email, this.config.getSalt())
     };
 
     this.ok(res, tokenDto);
   }
 
   private async status(req: Request, res: Response, _next: NextFunction): Promise<void> {
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith('Bearer ')) {
-      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Authorization header is missing');
-    }
-
-    const token = header.slice('Bearer '.length).trim();
-    if (!token) {
-      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Token is missing');
-    }
-
-    const user = await this.users.findByEmail(token);
+    const user = (req as RequestWithUser).user;
     if (!user) {
-      throw new HttpError(StatusCodes.UNAUTHORIZED, 'User not found for this token');
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
     const dto = this.toUserPublicDto(user);
@@ -112,6 +116,15 @@ export class AuthController extends Controller {
 
   private async uploadAvatar(req: Request, res: Response, _next: NextFunction): Promise<void> {
     const { userId } = req.params;
+
+    const currentUser = (req as RequestWithUser).user;
+    if (!currentUser) {
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
+    }
+
+    if (String(currentUser._id) !== String(userId)) {
+      throw new HttpError(StatusCodes.FORBIDDEN, 'You can update only your avatar');
+    }
 
     if (!req.file) {
       throw new HttpError(StatusCodes.BAD_REQUEST, 'Avatar file is required');
@@ -133,7 +146,7 @@ export class AuthController extends Controller {
       id: String(user._id),
       name: user.name,
       email: user.email,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || DEFAULT_AVATAR_URL,
       type: user.type
     };
   }

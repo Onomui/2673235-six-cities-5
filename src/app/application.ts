@@ -1,5 +1,6 @@
 import { inject, injectable } from 'inversify';
 import express, { type Express } from 'express';
+import { mkdir } from 'node:fs/promises';
 import { TYPES } from '../container/types.js';
 import { PinoLoggerService } from '../logger/logger.js';
 import { ConfigService } from '../config/service.js';
@@ -31,9 +32,7 @@ export class Application {
     this.app.use(express.json());
 
     const uploadDir = this.config.getUploadDir();
-    if (uploadDir) {
-      this.app.use('/static', express.static(uploadDir));
-    }
+    this.app.use('/static', express.static(uploadDir));
   }
 
   private registerRoutes(): void {
@@ -41,14 +40,8 @@ export class Application {
 
     this.app.use(`${apiPrefix}${this.authController.basePath}`, this.authController.router);
     this.app.use(`${apiPrefix}${this.offerController.basePath}`, this.offerController.router);
-    this.app.use(
-      `${apiPrefix}${this.favoriteController.basePath}`,
-      this.favoriteController.router
-    );
-    this.app.use(
-      `${apiPrefix}${this.commentController.basePath}`,
-      this.commentController.router
-    );
+    this.app.use(`${apiPrefix}${this.favoriteController.basePath}`, this.favoriteController.router);
+    this.app.use(`${apiPrefix}${this.commentController.basePath}`, this.commentController.router);
   }
 
   private registerExceptionFilters(): void {
@@ -57,15 +50,17 @@ export class Application {
 
   private async initDb(): Promise<void> {
     const host = this.config.getDbHost();
-    if (!host) {
-      this.logger.warn('DB_HOST is not set, DB connection is skipped');
-      return;
-    }
     const uri = `mongodb://${host}:27017/six-cities`;
     await this.database.connect(uri);
   }
 
+  private async ensureUploadDir(): Promise<void> {
+    const uploadDir = this.config.getUploadDir();
+    await mkdir(uploadDir, { recursive: true });
+  }
+
   async init(): Promise<void> {
+    await this.ensureUploadDir();
     await this.initDb();
     this.registerMiddlewares();
     this.registerRoutes();

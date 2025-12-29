@@ -1,10 +1,9 @@
 import { injectable } from 'inversify';
 import 'dotenv/config.js';
 import convict from 'convict';
-import { url, ipaddress } from 'convict-format-with-validator';
+import { url } from 'convict-format-with-validator';
 
 convict.addFormat(url);
-convict.addFormat(ipaddress);
 
 type RawConfig = {
   app: {
@@ -21,6 +20,8 @@ type RawConfig = {
 
 type ConfigKey = 'app.port' | 'app.salt' | 'db.host' | 'upload.dir';
 
+const REQUIRED_ENVS = ['PORT', 'SALT', 'DB_HOST', 'UPLOAD_DIR'] as const;
+
 @injectable()
 export class ConfigService {
   private readonly conf = convict<RawConfig>({
@@ -29,10 +30,10 @@ export class ConfigService {
         doc: 'App port',
         format: 'port',
         default: 3000,
-        env: 'APP_PORT'
+        env: 'PORT'
       },
       salt: {
-        doc: 'Salt for hashing',
+        doc: 'Salt/secret for hashing and tokens',
         format: String,
         default: '',
         env: 'SALT'
@@ -40,8 +41,8 @@ export class ConfigService {
     },
     db: {
       host: {
-        doc: 'DB host IP',
-        format: 'ipaddress',
+        doc: 'DB host',
+        format: String,
         default: '',
         env: 'DB_HOST'
       }
@@ -57,6 +58,15 @@ export class ConfigService {
   });
 
   constructor() {
+    const missing = REQUIRED_ENVS.filter((key) => {
+      const value = process.env[key];
+      return !value || !value.trim();
+    });
+
+    if (missing.length) {
+      throw new Error(`Missing environment variables: ${missing.join(', ')}`);
+    }
+
     this.conf.validate({ allowed: 'strict' });
   }
 

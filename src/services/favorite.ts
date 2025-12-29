@@ -18,8 +18,21 @@ export class FavoriteService {
     await this.favs.remove(userId, offerId);
   }
 
+  async removeByOffer(offerId: string) {
+    await this.favs.removeByOffer(offerId);
+  }
+
+  async getOfferIds(userId: string) {
+    return this.favs.findOfferIdsByUser(userId);
+  }
+
+  async getOfferIdSet(userId: string): Promise<Set<string>> {
+    const ids = await this.getOfferIds(userId);
+    return new Set(ids);
+  }
+
   async list(userId: string): Promise<OfferDB[]> {
-    const ids = await this.favs.findOfferIdsByUser(userId);
+    const ids = await this.getOfferIds(userId);
     if (!ids.length) {
       return [];
     }

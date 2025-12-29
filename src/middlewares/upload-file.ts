@@ -8,6 +8,8 @@ import { StatusCodes } from 'http-status-codes';
 import { HttpError } from '../errors/http-error.js';
 import type { Middleware } from './middleware.interface.js';
 
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png']);
+
 export class UploadFileMiddleware implements Middleware {
   private readonly upload: RequestHandler;
 
@@ -29,7 +31,16 @@ export class UploadFileMiddleware implements Middleware {
       }
     });
 
-    this.upload = multer({ storage }).single(this.fieldName);
+    this.upload = multer({
+      storage,
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+          cb(new HttpError(StatusCodes.BAD_REQUEST, 'Only .jpg or .png files are allowed'));
+          return;
+        }
+        cb(null, true);
+      }
+    }).single(this.fieldName);
   }
 
   execute(req: Request, res: Response, next: NextFunction): void {
