@@ -9,6 +9,7 @@ type RawConfig = {
   app: {
     port: number;
     salt: string;
+    jwtSecret: string;
   };
   db: {
     host: string;
@@ -18,9 +19,9 @@ type RawConfig = {
   };
 };
 
-type ConfigKey = 'app.port' | 'app.salt' | 'db.host' | 'upload.dir';
+type ConfigKey = 'app.port' | 'app.salt' | 'app.jwtSecret' | 'db.host' | 'upload.dir';
 
-const REQUIRED_ENVS = ['PORT', 'SALT', 'DB_HOST', 'UPLOAD_DIR'] as const;
+const REQUIRED_ENVS = ['PORT', 'SALT', 'JWT_SECRET', 'DB_HOST', 'UPLOAD_DIR'] as const;
 
 @injectable()
 export class ConfigService {
@@ -33,10 +34,16 @@ export class ConfigService {
         env: 'PORT'
       },
       salt: {
-        doc: 'Salt/secret for hashing and tokens',
+        doc: 'Salt for hashing passwords',
         format: String,
         default: '',
         env: 'SALT'
+      },
+      jwtSecret: {
+        doc: 'Secret for signing JWT',
+        format: String,
+        default: '',
+        env: 'JWT_SECRET'
       }
     },
     db: {
@@ -84,6 +91,10 @@ export class ConfigService {
 
   getSalt(): string {
     return this.conf.get('app.salt');
+  }
+
+  getJwtSecret(): string {
+    return this.conf.get('app.jwtSecret');
   }
 
   getUploadDir(): string {

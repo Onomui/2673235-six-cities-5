@@ -13,13 +13,18 @@ import { OfferService } from '../services/offer.js';
 import type { OfferDB } from '../db/models/offer.js';
 import type { OfferListItemDto } from '../dto/offer.js';
 
-import type { IUserRepository, WithId } from '../db/repositories/interfaces.js';
+import type { IUserRepository } from '../db/repositories/interfaces.js';
 import { ConfigService } from '../config/service.js';
 import { AuthMiddleware, type RequestWithUser } from '../middlewares/auth-middleware.js';
 
 import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
 import { DocumentExistsMiddleware } from '../middlewares/document-exists.js';
+
 import { HttpError } from '../errors/http-error.js';
+
+function getMongoId(doc: unknown): string {
+  return String((doc as { _id: unknown })._id);
+}
 
 @injectable()
 export class FavoriteController extends Controller {
@@ -32,7 +37,7 @@ export class FavoriteController extends Controller {
   ) {
     super(logger, '/favorites');
 
-    const auth = new AuthMiddleware(this.users, this.config.getSalt());
+    const auth = new AuthMiddleware(this.users, this.config.getJwtSecret());
 
     this.addRoute({
       method: 'get',
@@ -70,49 +75,57 @@ export class FavoriteController extends Controller {
       throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
-    const list = await this.favorites.list(String(user._id));
-    const dtos = list.map((offer: OfferDB) => this.toListItemDto(offer, true));
+    const offers = await this.favorites.list(String(user._id));
+    const dto = offers.map((offer) => this.toListItemDto(offer, true));
 
-    this.ok(res, dtos);
+    this.ok(res, dto);
   }
 
   private async create(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const { offerId } = req.params;
+
     const { user } = req as RequestWithUser;
     if (!user) {
       throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
-    const { offerId } = req.params;
     await this.favorites.add(String(user._id), offerId);
-    this.noContent(res);
+
+    const offer = await this.offers.getById(offerId);
+    if (!offer) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
+    }
+
+    this.ok(res, this.toListItemDto(offer, true));
   }
 
   private async remove(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const { offerId } = req.params;
+
     const { user } = req as RequestWithUser;
     if (!user) {
       throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
-    const { offerId } = req.params;
     await this.favorites.remove(String(user._id), offerId);
-    this.noContent(res);
+
+    const offer = await this.offers.getById(offerId);
+    if (!offer) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
+    }
+
+    this.ok(res, this.toListItemDto(offer, false));
   }
 
   private toListItemDto(offer: OfferDB, isFavorite: boolean): OfferListItemDto {
-    const withId = offer as Partial<WithId<OfferDB>>;
-    const id = withId._id ? String(withId._id) : '';
-
     return {
-      id,
+      id: getMongoId(offer),
       price: offer.price,
       title: offer.title,
-      type: offer.type as OfferListItemDto['type'],
+      type: offer.type,
       isFavorite,
-      postDate:
-        offer.postDate instanceof Date
-          ? offer.postDate.toISOString()
-          : String(offer.postDate),
-      city: offer.city as OfferListItemDto['city'],
+      postDate: offer.postDate.toISOString(),
+      city: offer.city,
       previewImage: offer.previewImage,
       isPremium: offer.isPremium,
       rating: offer.rating,

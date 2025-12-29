@@ -23,20 +23,16 @@ function getBearerToken(req: Request): string | null {
 }
 
 export class AuthMiddleware implements Middleware {
-  constructor(
-    private readonly users: IUserRepository,
-    private readonly secret: string
-  ) {}
+  constructor(private readonly users: IUserRepository, private readonly secret: string) {}
 
   async execute(req: Request, _res: Response, next: NextFunction): Promise<void> {
     const token = getBearerToken(req);
-
     if (!token) {
       next(new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized'));
       return;
     }
 
-    const payload = verifyToken(token, this.secret);
+    const payload = await verifyToken(token, this.secret);
     if (!payload) {
       next(new HttpError(StatusCodes.UNAUTHORIZED, 'Invalid token'));
       return;
@@ -54,20 +50,16 @@ export class AuthMiddleware implements Middleware {
 }
 
 export class OptionalAuthMiddleware implements Middleware {
-  constructor(
-    private readonly users: IUserRepository,
-    private readonly secret: string
-  ) {}
+  constructor(private readonly users: IUserRepository, private readonly secret: string) {}
 
   async execute(req: Request, _res: Response, next: NextFunction): Promise<void> {
     const token = getBearerToken(req);
-
     if (!token) {
       next();
       return;
     }
 
-    const payload = verifyToken(token, this.secret);
+    const payload = await verifyToken(token, this.secret);
     if (!payload) {
       next();
       return;
