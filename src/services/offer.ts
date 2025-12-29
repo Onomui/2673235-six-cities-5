@@ -38,6 +38,15 @@ export class OfferService {
 
   async recalcStats(offerId: string) {
     const agg = await this.comments.calcAvgAndCount(offerId);
-    await this.offers.updateStats(offerId, Number(agg.avg || 0), agg.count || 0);
+    let rating = Number(agg.avg || 0);
+
+    if (!agg.count) {
+      const offer = await this.offers.findById(offerId);
+      if (offer) {
+        rating = offer.rating;
+      }
+    }
+
+    await this.offers.updateStats(offerId, rating, agg.count || 0);
   }
 }

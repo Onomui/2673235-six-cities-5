@@ -9,6 +9,13 @@ export interface IExceptionFilter {
   catch(error: unknown, req: Request, res: Response, next: NextFunction): void;
 }
 
+type BodyParserError = {
+  status?: number;
+  statusCode?: number;
+  type?: string;
+  message?: string;
+};
+
 @injectable()
 export class ExceptionFilter implements IExceptionFilter {
   constructor(@inject(TYPES.Logger) private readonly logger: PinoLoggerService) {}
@@ -27,6 +34,17 @@ export class ExceptionFilter implements IExceptionFilter {
       });
       res.status(error.statusCode).json({
         error: error.message
+      });
+      return;
+    }
+
+    const err = error as BodyParserError;
+    const status = err?.status ?? err?.statusCode;
+
+    if (status === StatusCodes.BAD_REQUEST && err?.type === 'entity.parse.failed') {
+      this.logger.warn('Bad request', { url: req.url, details: err.message });
+      res.status(StatusCodes.BAD_REQUEST).json({
+        error: getReasonPhrase(StatusCodes.BAD_REQUEST)
       });
       return;
     }
