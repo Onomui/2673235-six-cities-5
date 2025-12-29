@@ -1,6 +1,8 @@
 import { inject, injectable } from 'inversify';
 import express, { type Express } from 'express';
+import cors from 'cors';
 import { mkdir } from 'node:fs/promises';
+import { StatusCodes } from 'http-status-codes';
 import { TYPES } from '../container/types.js';
 import { PinoLoggerService } from '../logger/logger.js';
 import { ConfigService } from '../config/service.js';
@@ -10,6 +12,7 @@ import { OfferController } from '../controllers/offer.js';
 import { FavoriteController } from '../controllers/favorite.js';
 import { CommentController } from '../controllers/comment.js';
 import { ExceptionFilter } from '../errors/exception-filter.js';
+import { HttpError } from '../errors/http-error.js';
 
 @injectable()
 export class Application {
@@ -29,6 +32,7 @@ export class Application {
   }
 
   private registerMiddlewares(): void {
+    this.app.use(cors());
     this.app.use(express.json());
 
     const uploadDir = this.config.getUploadDir();
@@ -42,6 +46,10 @@ export class Application {
     this.app.use(`${apiPrefix}${this.offerController.basePath}`, this.offerController.router);
     this.app.use(`${apiPrefix}${this.favoriteController.basePath}`, this.favoriteController.router);
     this.app.use(`${apiPrefix}${this.commentController.basePath}`, this.commentController.router);
+
+    this.app.use((_req, _res, next) => {
+      next(new HttpError(StatusCodes.NOT_FOUND, 'Not found'));
+    });
   }
 
   private registerExceptionFilters(): void {

@@ -90,13 +90,7 @@ export class FavoriteController extends Controller {
     }
 
     await this.favorites.add(String(user._id), offerId);
-
-    const offer = await this.offers.getById(offerId);
-    if (!offer) {
-      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
-    }
-
-    this.ok(res, this.toListItemDto(offer, true));
+    this.noContent(res);
   }
 
   private async remove(req: Request, res: Response, _next: NextFunction): Promise<void> {
@@ -108,13 +102,7 @@ export class FavoriteController extends Controller {
     }
 
     await this.favorites.remove(String(user._id), offerId);
-
-    const offer = await this.offers.getById(offerId);
-    if (!offer) {
-      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
-    }
-
-    this.ok(res, this.toListItemDto(offer, false));
+    this.noContent(res);
   }
 
   private toListItemDto(offer: OfferDB, isFavorite: boolean): OfferListItemDto {

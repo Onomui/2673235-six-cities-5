@@ -28,13 +28,12 @@ async function main(argv: string[]): Promise<void> {
 
   if (cmd === '--import') {
     const path = args[1];
-    const mongoUri = args[2];
-    if (!path || !mongoUri) {
-      console.error(chalk.red('Использование: --import <path> <mongoUri>'));
+    if (!path) {
+      console.error(chalk.red('Использование: --import <filepath>'));
       process.exitCode = 1;
       return;
     }
-    await importTsv(path, mongoUri);
+    await importTsv(path);
     return;
   }
 
