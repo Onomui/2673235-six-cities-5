@@ -3,17 +3,44 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
-  IsString,
   IsUrl,
   Length,
   Max,
-  Min
+  Min,
+  ValidateNested
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { UserPublicDto } from './user.js';
+
+const CITIES = [
+  'Paris',
+  'Cologne',
+  'Brussels',
+  'Amsterdam',
+  'Hamburg',
+  'Dusseldorf'
+] as const;
+
+const HOUSING_TYPES = ['apartment', 'house', 'room', 'hotel'] as const;
+
+const AMENITIES = [
+  'Breakfast',
+  'Air conditioning',
+  'Laptop friendly workspace',
+  'Baby seat',
+  'Washer',
+  'Towels',
+  'Fridge'
+] as const;
+
+type City = typeof CITIES[number];
+type HousingType = typeof HOUSING_TYPES[number];
+type Amenity = typeof AMENITIES[number];
 
 export class CoordinatesDto {
   @IsNumber()
@@ -24,19 +51,17 @@ export class CoordinatesDto {
 }
 
 export class OfferCreateDto {
-  @IsString()
   @Length(10, 100)
     title!: string;
 
-  @IsString()
   @Length(20, 1024)
     description!: string;
 
-  @IsString()
+  @IsISO8601()
     postDate!: string;
 
-  @IsString()
-    city!: 'Paris' | 'Cologne' | 'Brussels' | 'Amsterdam' | 'Hamburg' | 'Dusseldorf';
+  @IsIn(CITIES as unknown as string[])
+    city!: City;
 
   @IsUrl()
     previewImage!: string;
@@ -53,13 +78,13 @@ export class OfferCreateDto {
   @IsBoolean()
     isFavorite!: boolean;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 1 })
   @Min(1)
   @Max(5)
     rating!: number;
 
-  @IsString()
-    type!: 'apartment' | 'house' | 'room' | 'hotel';
+  @IsIn(HOUSING_TYPES as unknown as string[])
+    type!: HousingType;
 
   @IsInt()
   @Min(1)
@@ -77,43 +102,31 @@ export class OfferCreateDto {
     price!: number;
 
   @IsArray()
-  @IsString({ each: true })
-    amenities!: Array<
-    | 'Breakfast'
-    | 'Air conditioning'
-    | 'Laptop friendly workspace'
-    | 'Baby seat'
-    | 'Washer'
-    | 'Towels'
-    | 'Fridge'
-  >;
+  @ArrayMinSize(1)
+  @IsIn(AMENITIES as unknown as string[], { each: true })
+    amenities!: Amenity[];
 
+  @ValidateNested()
   @Type(() => CoordinatesDto)
     coordinates!: CoordinatesDto;
-
-  @IsOptional()
-  @IsString()
-    authorId?: string;
 }
 
 export class OfferUpdateDto {
   @IsOptional()
-  @IsString()
   @Length(10, 100)
     title?: string;
 
   @IsOptional()
-  @IsString()
   @Length(20, 1024)
     description?: string;
 
   @IsOptional()
-  @IsString()
+  @IsISO8601()
     postDate?: string;
 
   @IsOptional()
-  @IsString()
-    city?: 'Paris' | 'Cologne' | 'Brussels' | 'Amsterdam' | 'Hamburg' | 'Dusseldorf';
+  @IsIn(CITIES as unknown as string[])
+    city?: City;
 
   @IsOptional()
   @IsUrl()
@@ -121,6 +134,8 @@ export class OfferUpdateDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMinSize(6)
+  @ArrayMaxSize(6)
   @IsUrl({}, { each: true })
     photos?: string[];
 
@@ -133,14 +148,14 @@ export class OfferUpdateDto {
     isFavorite?: boolean;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 1 })
   @Min(1)
   @Max(5)
     rating?: number;
 
   @IsOptional()
-  @IsString()
-    type?: 'apartment' | 'house' | 'room' | 'hotel';
+  @IsIn(HOUSING_TYPES as unknown as string[])
+    type?: HousingType;
 
   @IsOptional()
   @IsInt()
@@ -162,18 +177,12 @@ export class OfferUpdateDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-    amenities?: Array<
-    | 'Breakfast'
-    | 'Air conditioning'
-    | 'Laptop friendly workspace'
-    | 'Baby seat'
-    | 'Washer'
-    | 'Towels'
-    | 'Fridge'
-  >;
+  @ArrayMinSize(1)
+  @IsIn(AMENITIES as unknown as string[], { each: true })
+    amenities?: Amenity[];
 
   @IsOptional()
+  @ValidateNested()
   @Type(() => CoordinatesDto)
     coordinates?: CoordinatesDto;
 }
@@ -182,10 +191,10 @@ export interface OfferListItemDto {
   id: string;
   price: number;
   title: string;
-  type: 'apartment' | 'house' | 'room' | 'hotel';
+  type: HousingType;
   isFavorite: boolean;
   postDate: string;
-  city: 'Paris' | 'Cologne' | 'Brussels' | 'Amsterdam' | 'Hamburg' | 'Dusseldorf';
+  city: City;
   previewImage: string;
   isPremium: boolean;
   rating: number;
@@ -197,15 +206,7 @@ export interface OfferFullDto extends OfferListItemDto {
   photos: string[];
   bedrooms: number;
   maxAdults: number;
-  amenities: Array<
-    | 'Breakfast'
-    | 'Air conditioning'
-    | 'Laptop friendly workspace'
-    | 'Baby seat'
-    | 'Washer'
-    | 'Towels'
-    | 'Fridge'
-  >;
+  amenities: Amenity[];
   author: UserPublicDto;
   coordinates: { latitude: number; longitude: number };
 }

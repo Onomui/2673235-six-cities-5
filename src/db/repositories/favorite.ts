@@ -1,29 +1,37 @@
-import { Model, Types } from 'mongoose';
-import { IFavoriteRepository } from './interfaces.js';
-import { FavoriteDB } from '../models/favorite.js';
+import type { Model } from 'mongoose';
+import { Types } from 'mongoose';
+import type { FavoriteDB } from '../models/favorite.js';
+import type { IFavoriteRepository } from './interfaces.js';
 
 export class FavoriteRepository implements IFavoriteRepository {
   constructor(private readonly model: Model<FavoriteDB>) {}
 
-  async add(userId: string | Types.ObjectId, offerId: string | Types.ObjectId): Promise<void> {
-    await this.model.updateOne(
-      { user: userId, offer: offerId },
-      { $setOnInsert: { user: userId, offer: offerId } },
-      { upsert: true }
-    );
+  async add(userId: string, offerId: string): Promise<void> {
+    await this.model.create({
+      user: new Types.ObjectId(userId),
+      offer: new Types.ObjectId(offerId)
+    });
   }
 
-  async remove(userId: string | Types.ObjectId, offerId: string | Types.ObjectId): Promise<void> {
-    await this.model.deleteOne({ user: userId, offer: offerId });
+  async remove(userId: string, offerId: string): Promise<void> {
+    await this.model.deleteOne({
+      user: new Types.ObjectId(userId),
+      offer: new Types.ObjectId(offerId)
+    });
   }
 
-  async findOfferIdsByUser(userId: string | Types.ObjectId): Promise<Types.ObjectId[]> {
+  async removeByOffer(offerId: string): Promise<void> {
+    await this.model.deleteMany({
+      offer: new Types.ObjectId(offerId)
+    });
+  }
+
+  async findOfferIdsByUser(userId: string): Promise<string[]> {
     const rows = await this.model
-      .find({ user: userId })
-      .select('offer -_id')
-      .lean();
+      .find({ user: new Types.ObjectId(userId) })
+      .select('offer')
+      .lean<{ offer: Types.ObjectId }[]>();
 
-    const typedRows = rows as Array<{ offer: Types.ObjectId }>;
-    return typedRows.map((row) => row.offer);
+    return rows.map((r) => String(r.offer));
   }
 }

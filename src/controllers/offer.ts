@@ -2,56 +2,66 @@ import type { Request, Response, NextFunction } from 'express';
 import asyncHandler from 'express-async-handler';
 import { inject, injectable } from 'inversify';
 import { StatusCodes } from 'http-status-codes';
-import { Types } from 'mongoose';
+
 import { TYPES } from '../container/types.js';
 import { Controller } from './controller.js';
 import { PinoLoggerService } from '../logger/logger.js';
-import { OfferService } from '../services/offer.js';
-import type { IUserRepository, WithId } from '../db/repositories/interfaces.js';
-import type { OfferDB } from '../db/models/offer.js';
-import type { UserDB } from '../db/models/user.js';
-import { OfferCreateDto, OfferUpdateDto } from '../dto/offer.js';
-import type { OfferListItemDto, OfferFullDto } from '../dto/offer.js';
-import type { UserPublicDto } from '../dto/user.js';
-import { HttpError } from '../errors/http-error.js';
-import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
-import { ValidateDtoMiddleware } from '../middlewares/validate-dto.js';
 
-type OfferWithId = OfferDB & { _id?: unknown };
+import type { IUserRepository, WithId } from '../db/repositories/interfaces.js';
+import type { UserDB } from '../db/models/user.js';
+import type { OfferDB } from '../db/models/offer.js';
+
+import { OfferService } from '../services/offer.js';
+import { FavoriteService } from '../services/favorite.js';
+
+import { HttpError } from '../errors/http-error.js';
+
+import { ValidateDtoMiddleware } from '../middlewares/validate-dto.js';
+import { ValidateObjectIdMiddleware } from '../middlewares/validate-object-id.js';
+import { AuthMiddleware, OptionalAuthMiddleware, type RequestWithUser } from '../middlewares/auth-middleware.js';
+import { DocumentExistsMiddleware } from '../middlewares/document-exists.js';
+
+import { ConfigService } from '../config/service.js';
+
+import { OfferCreateDto, OfferUpdateDto } from '../dto/offer.js';
+import type { OfferFullDto, OfferListItemDto } from '../dto/offer.js';
+
+type OfferListQuery = {
+  limit?: string;
+  city?: string;
+};
+
+type OfferPremiumQuery = {
+  city?: string;
+};
+
+const MAX_OFFERS_DEFAULT = 60;
+const MAX_PREMIUM_OFFERS = 3;
+const DEFAULT_AVATAR_URL = '/static/default-avatar.png';
+
+function getMongoId(doc: unknown): string {
+  return String((doc as { _id: unknown })._id);
+}
 
 @injectable()
 export class OfferController extends Controller {
   constructor(
     @inject(TYPES.Logger) logger: PinoLoggerService,
     @inject(TYPES.OfferService) private readonly offers: OfferService,
-    @inject(TYPES.UserRepository) private readonly users: IUserRepository
+    @inject(TYPES.FavoriteService) private readonly favorites: FavoriteService,
+    @inject(TYPES.UserRepository) private readonly users: IUserRepository,
+    @inject(TYPES.Config) private readonly config: ConfigService
   ) {
     super(logger, '/offers');
 
-    this.addRoute({
-      method: 'get',
-      path: '/',
-      handlers: [asyncHandler(this.list.bind(this))]
-    });
+    const auth = new AuthMiddleware(this.users, this.config.getJwtSecret());
+    const optionalAuth = new OptionalAuthMiddleware(this.users, this.config.getJwtSecret());
 
     this.addRoute({
       method: 'post',
       path: '/',
-      middlewares: [new ValidateDtoMiddleware(OfferCreateDto)],
+      middlewares: [auth, new ValidateDtoMiddleware(OfferCreateDto)],
       handlers: [asyncHandler(this.create.bind(this))]
-    });
-
-    this.addRoute({
-      method: 'get',
-      path: '/premium',
-      handlers: [asyncHandler(this.listPremium.bind(this))]
-    });
-
-    this.addRoute({
-      method: 'get',
-      path: '/:offerId',
-      middlewares: [new ValidateObjectIdMiddleware('offerId')],
-      handlers: [asyncHandler(this.getById.bind(this))]
     });
 
     this.addRoute({
@@ -59,6 +69,8 @@ export class OfferController extends Controller {
       path: '/:offerId',
       middlewares: [
         new ValidateObjectIdMiddleware('offerId'),
+        auth,
+        new DocumentExistsMiddleware<OfferDB>('offerId', this.offers, 'Offer not found'),
         new ValidateDtoMiddleware(OfferUpdateDto)
       ],
       handlers: [asyncHandler(this.update.bind(this))]
@@ -67,166 +79,189 @@ export class OfferController extends Controller {
     this.addRoute({
       method: 'delete',
       path: '/:offerId',
-      middlewares: [new ValidateObjectIdMiddleware('offerId')],
-      handlers: [asyncHandler(this.remove.bind(this))]
+      middlewares: [
+        new ValidateObjectIdMiddleware('offerId'),
+        auth,
+        new DocumentExistsMiddleware<OfferDB>('offerId', this.offers, 'Offer not found')
+      ],
+      handlers: [asyncHandler(this.delete.bind(this))]
     });
-  }
 
-  private async list(req: Request, res: Response, _next: NextFunction): Promise<void> {
-    const { city, limit } = req.query;
+    this.addRoute({
+      method: 'get',
+      path: '/',
+      middlewares: [optionalAuth],
+      handlers: [asyncHandler(this.index.bind(this))]
+    });
 
-    const limitRaw = typeof limit === 'string' ? Number(limit) : 60;
-    const limitValue = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 60;
+    this.addRoute({
+      method: 'get',
+      path: '/premium',
+      middlewares: [optionalAuth],
+      handlers: [asyncHandler(this.premium.bind(this))]
+    });
 
-    const cityValue =
-      typeof city === 'string' && city.length
-        ? (city as OfferDB['city'])
-        : undefined;
-
-    const items = await this.offers.list(limitValue, cityValue);
-    const dtos = items.map((offer) => this.toListItemDto(offer));
-    this.ok(res, dtos);
+    this.addRoute({
+      method: 'get',
+      path: '/:offerId',
+      middlewares: [new ValidateObjectIdMiddleware('offerId'), optionalAuth],
+      handlers: [asyncHandler(this.show.bind(this))]
+    });
   }
 
   private async create(req: Request, res: Response, _next: NextFunction): Promise<void> {
     const payload = req.body as OfferCreateDto;
 
-    if (!payload.authorId || !Types.ObjectId.isValid(payload.authorId)) {
-      throw new HttpError(
-        StatusCodes.BAD_REQUEST,
-        'authorId is required and must be a valid ObjectId'
-      );
+    const { user } = req as RequestWithUser;
+    if (!user) {
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
     }
 
-    const authorObjectId = new Types.ObjectId(payload.authorId);
-
-    const data: Partial<OfferDB> = {
+    const created = await this.offers.create({
       title: payload.title,
       description: payload.description,
-      postDate: new Date(payload.postDate || new Date().toISOString()),
+      postDate: new Date(payload.postDate),
       city: payload.city,
       previewImage: payload.previewImage,
       photos: payload.photos,
       isPremium: payload.isPremium,
-      isFavorite: payload.isFavorite,
+      isFavorite: false,
       rating: payload.rating,
       type: payload.type,
       bedrooms: payload.bedrooms,
       maxAdults: payload.maxAdults,
       price: payload.price,
       amenities: payload.amenities,
-      coordinates: payload.coordinates,
-      author: authorObjectId,
-      commentsCount: 0
-    };
+      author: user._id,
+      commentsCount: 0,
+      coordinates: payload.coordinates
+    });
 
-    const created = await this.offers.create(data);
-    const dto = await this.toFullDto(created);
+    const favSet = await this.getFavoriteOfferIdSet(req);
+    const dto = await this.toFullDto(created, favSet.has(getMongoId(created)));
+
     this.created(res, dto);
-  }
-
-  private async listPremium(req: Request, res: Response, _next: NextFunction): Promise<void> {
-    const { city } = req.query;
-    if (typeof city !== 'string' || !city.length) {
-      throw new HttpError(StatusCodes.BAD_REQUEST, 'city query param is required');
-    }
-
-    const items = await this.offers.listPremiumByCity(city as OfferDB['city'], 3);
-    const dtos = items.map((offer) => this.toListItemDto(offer));
-    this.ok(res, dtos);
-  }
-
-  private async getById(req: Request, res: Response, _next: NextFunction): Promise<void> {
-    const { offerId } = req.params;
-    const offer = await this.offers.getById(offerId);
-    if (!offer) {
-      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
-    }
-    const dto = await this.toFullDto(offer);
-    this.ok(res, dto);
   }
 
   private async update(req: Request, res: Response, _next: NextFunction): Promise<void> {
     const { offerId } = req.params;
+
+    const { user } = req as RequestWithUser;
+    if (!user) {
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
+    }
+
+    const offer = await this.offers.getById(offerId);
+    if (!offer) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
+    }
+
+    if (String(offer.author) !== String(user._id)) {
+      throw new HttpError(StatusCodes.FORBIDDEN, 'You can update only your offers');
+    }
+
     const payload = req.body as OfferUpdateDto;
 
-    const data: Partial<OfferDB> = {};
+    const data: Partial<OfferDB> = { ...payload } as unknown as Partial<OfferDB>;
 
-    if (typeof payload.title === 'string') {
-      data.title = payload.title;
-    }
-    if (typeof payload.description === 'string') {
-      data.description = payload.description;
-    }
-    if (typeof payload.postDate === 'string') {
+    if (payload.postDate) {
       data.postDate = new Date(payload.postDate);
     }
-    if (typeof payload.city === 'string') {
-      data.city = payload.city as OfferDB['city'];
-    }
-    if (typeof payload.previewImage === 'string') {
-      data.previewImage = payload.previewImage;
-    }
-    if (Array.isArray(payload.photos)) {
-      data.photos = payload.photos;
-    }
-    if (typeof payload.isPremium === 'boolean') {
-      data.isPremium = payload.isPremium;
-    }
-    if (typeof payload.isFavorite === 'boolean') {
-      data.isFavorite = payload.isFavorite;
-    }
-    if (typeof payload.rating === 'number') {
-      data.rating = payload.rating;
-    }
-    if (typeof payload.type === 'string') {
-      data.type = payload.type as OfferDB['type'];
-    }
-    if (typeof payload.bedrooms === 'number') {
-      data.bedrooms = payload.bedrooms;
-    }
-    if (typeof payload.maxAdults === 'number') {
-      data.maxAdults = payload.maxAdults;
-    }
-    if (typeof payload.price === 'number') {
-      data.price = payload.price;
-    }
-    if (Array.isArray(payload.amenities)) {
-      data.amenities = payload.amenities as OfferDB['amenities'];
-    }
-    if (payload.coordinates) {
-      data.coordinates = payload.coordinates;
-    }
+
+    delete (data as unknown as { isFavorite?: boolean }).isFavorite;
 
     const updated = await this.offers.update(offerId, data);
     if (!updated) {
       throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
     }
 
-    const dto = await this.toFullDto(updated);
+    const favSet = await this.getFavoriteOfferIdSet(req);
+    const dto = await this.toFullDto(updated, favSet.has(getMongoId(updated)));
+
     this.ok(res, dto);
   }
 
-  private async remove(req: Request, res: Response, _next: NextFunction): Promise<void> {
+  private async delete(req: Request, res: Response, _next: NextFunction): Promise<void> {
     const { offerId } = req.params;
+
+    const { user } = req as RequestWithUser;
+    if (!user) {
+      throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
+    }
+
+    const offer = await this.offers.getById(offerId);
+    if (!offer) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
+    }
+
+    if (String(offer.author) !== String(user._id)) {
+      throw new HttpError(StatusCodes.FORBIDDEN, 'You can delete only your offers');
+    }
+
+    await this.favorites.removeByOffer(offerId);
     await this.offers.remove(offerId);
+
     this.noContent(res);
   }
 
-  private toListItemDto(offer: OfferDB): OfferListItemDto {
-    const withId = offer as OfferWithId;
-    const id = withId._id ? String(withId._id) : '';
+  private async index(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const { limit, city } = req.query as OfferListQuery;
 
+    const max = limit ? Number(limit) : MAX_OFFERS_DEFAULT;
+    const safeLimit = Number.isFinite(max) && max > 0 ? max : MAX_OFFERS_DEFAULT;
+
+    const offers = await this.offers.list(safeLimit, city as OfferDB['city'] | undefined);
+
+    const favSet = await this.getFavoriteOfferIdSet(req);
+
+    const dto = offers.map((offer) => {
+      const id = getMongoId(offer);
+      return this.toListItemDto(offer, favSet.has(id));
+    });
+
+    this.ok(res, dto);
+  }
+
+  private async premium(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const { city } = req.query as OfferPremiumQuery;
+    if (!city) {
+      throw new HttpError(StatusCodes.BAD_REQUEST, 'City query is required');
+    }
+
+    const offers = await this.offers.listPremiumByCity(city as OfferDB['city'], MAX_PREMIUM_OFFERS);
+
+    const favSet = await this.getFavoriteOfferIdSet(req);
+
+    const dto = offers.map((offer) => {
+      const id = getMongoId(offer);
+      return this.toListItemDto(offer, favSet.has(id));
+    });
+
+    this.ok(res, dto);
+  }
+
+  private async show(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const { offerId } = req.params;
+
+    const offer = await this.offers.getById(offerId);
+    if (!offer) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Offer not found');
+    }
+
+    const favSet = await this.getFavoriteOfferIdSet(req);
+
+    const dto = await this.toFullDto(offer, favSet.has(getMongoId(offer)));
+    this.ok(res, dto);
+  }
+
+  private toListItemDto(offer: OfferDB, isFavorite: boolean): OfferListItemDto {
     return {
-      id,
+      id: getMongoId(offer),
       price: offer.price,
       title: offer.title,
       type: offer.type,
-      isFavorite: offer.isFavorite,
-      postDate:
-        offer.postDate instanceof Date
-          ? offer.postDate.toISOString()
-          : String(offer.postDate),
+      isFavorite,
+      postDate: offer.postDate.toISOString(),
       city: offer.city,
       previewImage: offer.previewImage,
       isPremium: offer.isPremium,
@@ -235,39 +270,40 @@ export class OfferController extends Controller {
     };
   }
 
-  private async toFullDto(offer: OfferDB): Promise<OfferFullDto> {
-    const base = this.toListItemDto(offer);
-    const user = await this.users.findById(offer.author);
-    const authorDto = this.toUserPublic(user);
+  private async toFullDto(offer: OfferDB, isFavorite: boolean): Promise<OfferFullDto> {
+    const author = await this.users.findById(String(offer.author));
+    if (!author) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Author not found');
+    }
 
     return {
-      ...base,
+      ...this.toListItemDto(offer, isFavorite),
       description: offer.description,
       photos: offer.photos,
       bedrooms: offer.bedrooms,
       maxAdults: offer.maxAdults,
       amenities: offer.amenities,
-      author: authorDto,
-      coordinates: offer.coordinates
+      coordinates: offer.coordinates,
+      author: this.toUserPublicDto(author)
     };
   }
 
-  private toUserPublic(user: WithId<UserDB> | null): UserPublicDto {
-    if (!user) {
-      return {
-        id: '',
-        name: '',
-        email: '',
-        type: 'regular'
-      };
-    }
-
+  private toUserPublicDto(user: WithId<UserDB>) {
     return {
       id: String(user._id),
       name: user.name,
       email: user.email,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: user.avatarUrl || DEFAULT_AVATAR_URL,
       type: user.type
     };
+  }
+
+  private async getFavoriteOfferIdSet(req: Request): Promise<Set<string>> {
+    const { user } = req as RequestWithUser;
+    if (!user) {
+      return new Set<string>();
+    }
+
+    return this.favorites.getOfferIdSet(String(user._id));
   }
 }

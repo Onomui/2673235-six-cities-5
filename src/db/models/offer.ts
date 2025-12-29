@@ -1,8 +1,9 @@
-import { Schema, model, Model, Types } from 'mongoose';
+import { Schema, model, Types, type Model, type SchemaDefinition } from 'mongoose';
 
-type CityDB = 'Paris' | 'Cologne' | 'Brussels' | 'Amsterdam' | 'Hamburg' | 'Dusseldorf';
-type HousingTypeDB = 'apartment' | 'house' | 'room' | 'hotel';
-type AmenityDB =
+export type CityDB = 'Paris' | 'Cologne' | 'Brussels' | 'Amsterdam' | 'Hamburg' | 'Dusseldorf';
+export type HousingTypeDB = 'apartment' | 'house' | 'room' | 'hotel';
+
+export type AmenityDB =
   | 'Breakfast'
   | 'Air conditioning'
   | 'Laptop friendly workspace'
@@ -10,6 +11,19 @@ type AmenityDB =
   | 'Washer'
   | 'Towels'
   | 'Fridge';
+
+export interface CoordinatesDB {
+  latitude: number;
+  longitude: number;
+}
+
+const coordinatesSchema = new Schema(
+  {
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true }
+  },
+  { _id: false }
+);
 
 export interface OfferDB {
   title: string;
@@ -28,39 +42,29 @@ export interface OfferDB {
   amenities: AmenityDB[];
   author: Types.ObjectId;
   commentsCount: number;
-  coordinates: { latitude: number; longitude: number };
-  createdAt: Date;
-  updatedAt: Date;
+  coordinates: CoordinatesDB;
 }
 
-const CoordinatesSchema = new Schema(
-  {
-    latitude: Number,
-    longitude: Number
-  },
-  { _id: false }
-);
-
-const offerDefinition = {
-  title: String,
-  description: String,
-  postDate: Date,
-  city: String,
-  previewImage: String,
-  photos: [String],
-  isPremium: Boolean,
-  isFavorite: Boolean,
-  rating: Number,
-  type: String,
-  bedrooms: Number,
-  maxAdults: Number,
-  price: Number,
-  amenities: [String],
-  author: { type: Schema.Types.ObjectId, ref: 'User' },
-  commentsCount: Number,
-  coordinates: CoordinatesSchema
+const offerDefinition: SchemaDefinition = {
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  postDate: { type: Date, required: true },
+  city: { type: String, required: true },
+  previewImage: { type: String, required: true },
+  photos: { type: [String], required: true },
+  isPremium: { type: Boolean, required: true },
+  isFavorite: { type: Boolean, required: true, default: false },
+  rating: { type: Number, required: true },
+  type: { type: String, required: true },
+  bedrooms: { type: Number, required: true },
+  maxAdults: { type: Number, required: true },
+  price: { type: Number, required: true },
+  amenities: { type: [String], required: true },
+  author: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  commentsCount: { type: Number, required: true, default: 0 },
+  coordinates: { type: coordinatesSchema, required: true }
 };
 
-const OfferSchema = new Schema<OfferDB>(offerDefinition, { timestamps: true });
+const OfferSchema = new Schema(offerDefinition, { timestamps: true });
 
-export const OfferModel: Model<OfferDB> = model<OfferDB>('Offer', OfferSchema);
+export const OfferModel = model('Offer', OfferSchema) as unknown as Model<OfferDB>;

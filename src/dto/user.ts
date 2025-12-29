@@ -2,7 +2,7 @@ import { IsEmail, IsIn, IsString, Length } from 'class-validator';
 
 export class UserRegisterDto {
   @IsString()
-  @Length(1, 50)
+  @Length(1, 15)
     name!: string;
 
   @IsEmail()
